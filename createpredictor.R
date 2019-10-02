@@ -99,7 +99,6 @@ PostCalcApprox <- function(x,GPmodel,XF,XFs,ZF,YE,XEs,ZE,ZD,integrateoveremulato
   
   #prior
   Prior = sum(c(w_default)*(x[1:npara]-parameter_default)^2) #pull it closer to true values
-  print(LikA+Prior)
   return(LikA+Prior)
 }
 
