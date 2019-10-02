@@ -60,36 +60,53 @@ mvec <- function(X,Y){
   return(-9+0.01*X+15*sqrt(Y))
 }
 
-PostCalcApprox <- function(x,GPmodel,XF,XFs,ZF,YE,XEs,ZE,ZD,lambda) {
+
+nsamp = 10
+normvecs = matrix(rnorm(length(ZF)*nsamp,0,1),nrow=length(ZF),ncol=nsamp) #makes function continous by fixing this
+
+
+PostCalcApprox <- function(x,GPmodel,XF,XFs,ZF,YE,XEs,ZE,ZD,integrateoveremulator=FALSE) {
   GP_obj = GPpred(GPmodel, cbind(XF, t(matrix(x, npara, nfield))))
   YF = exp(GP_obj$pred)[,1]
   
   #likellihood for field data
-  Cv <- 4*corrmat(c(XEs,XFs),c(YE,YF),c(Type1,Type2))+0.01*diag(rep(1,length(c(YE,YF))))
+  Rv <- corrmat(c(XEs,XFs),c(YE,YF),c(Type1,Type2))
+  if(integrateoveremulator){ #this will be a quick approximation, just to check
+    covemuerror = GP_obj$corr_mat*GP_obj$var_scale[1,1] + diag(rep(10^(-8),length(YF)))
+    L = chol(covemuerror)
+    Rv <- matrix(0,nrow=length(c(YE,YF)),ncol=length(c(YE,YF)))
+    
+    for(kv in 1:nsamp){ #draw over the emulator error
+      YFsamp = exp(GP_obj$pred[,1] + L%*%normvecs[,kv])
+      Rv <- Rv+1/nsamp*corrmat(c(XEs,XFs),c(YE,YFsamp),c(Type1,Type2))
+    }
+  }
+  Cv <- 4*Rv+10^(-4)*diag(rep(1,length(c(YE,YF))))
+  
   mv <- mvec(c(XEs,XFs),sqrt(c(YE,YF)))
   pv <- exp(mv)/(1+exp(mv))
   diagadj = exp(mv)/(1+exp(mv))^2
   Cva = diag(diagadj)%*%Cv%*%diag(diagadj)
   Va = diag(pmax(pv*(1-pv),10^(-4)))
-  LikA = 0.5*t(c(ZE,ZF)-pv)%*%solve(Cva+Va,c(ZE,ZF)-pv)
+  
+  #forgot det term on previous rounds, it is included below
+  LikA =0.5*sum(log(eigen(Cva+Va)$values))+ 0.5*t(c(ZE,ZF)-pv)%*%solve(Cva+Va,c(ZE,ZF)-pv)
   
   #likelihood for exp data
   twoexpvect = matrix((rep(c(25.47,1.75,35,parameter_default),2)),nrow=2,byrow=T)
   pd = rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), length(ZD))
   LikA = LikA + 0.5 * t(ZD - pd)%*%diag(rep(0.005^(-2), length(ZD)))%*%(ZD-pd)
   
-  #penalization - delta method due to log transformation
-  Penal = lambda * sqrt(abs(mean(exp(GP_obj$pred[, 1]) ^ 2 * diag(GP_obj$corr_mat) * GP_obj$var_scale[1, 1])))
-  
   #prior
   Prior = sum(c(w_default)*(x[1:npara]-parameter_default)^2) #pull it closer to true values
-  return(LikA+Prior-Penal)
+  print(LikA+Prior)
+  return(LikA+Prior)
 }
 
 opt.out1 = optim(
   parameter_default,
   fn = PostCalcApprox,
-  XF=XF,XFs=XFs,ZF=ZF,YE=YE,XEs=XEs,ZE=ZE,ZD=ZD,GPmodel=GP,lambda=1000,
+  XF=XF,XFs=XFs,ZF=ZF,YE=YE,XEs=XEs,ZE=ZE,ZD=ZD,GPmodel=GP,integrateoveremulator=TRUE,
   lower = c(apply(XCE[,4:(3+npara)],2,min)), 
   upper = c(apply(XCE[,4:(3+npara)],2,max)),
   control=list('factr' = 10^12, 'maxit'=50), 
