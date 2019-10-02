@@ -78,12 +78,9 @@ PostCalcApprox <- function(x,GPmodel,XF,XFs,ZF,YE,XEs,ZE,ZD,lambda) {
   pd = rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), length(ZD))
   LikA = LikA + 0.5 * t(ZD - pd)%*%diag(rep(0.005^(-2), length(ZD)))%*%(ZD-pd)
   
-  #penalization - delta method due to log transformation
-  Penal = lambda * sqrt(abs(mean(exp(GP_obj$pred[, 1]) ^ 2 * diag(GP_obj$corr_mat) * GP_obj$var_scale[1, 1])))
-  
   #prior
   Prior = sum(c(w_default)*(x[1:npara]-parameter_default)^2) #pull it closer to true values
-  return(LikA+Prior-Penal)
+  return(LikA+Prior)
 }
 
 opt.out1 = optim(
