@@ -224,23 +224,30 @@ opt.out2 = optim(
   hessian=T,
   method = "L-BFGS-B"
 )
-Cv2 <- 4*corrmat_error(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield+nexp))
+
+# predict injury risk for field data
+Xa1=c(XFs)
+Xa2=c(YF)
+Xa3=c(Type2)
+Cv2 <- 4*corrmat_error(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield))
 cholCv2 <- chol(Cv2)
 q2 = forwardsolve(t(cholCv2), opt.out2$par)
 wvals2 = backsolve(cholCv2, q2)
 
 #this function will be used to predict
 papprox <- function(DataPred){
+  #introduce model discrepancy
   YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + t(Cv2)%*%wvals2
 
   Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = DataPred$Age,Xb2 = YFpred, Xb3 = rep(1,length(DataPred$Age)))
 
+  #calculate injury risks
   zpred = mvec(DataPred$Age,sqrt(YF))+t(Cpred)%*%wvals
   return(exp(zpred)/(1+exp(zpred)))
 }
 
 #this is an approximation of the CI for the parameters. 
-#No identifiability correction was used, but we still have boundary issues
+#No identifiability correction was used
 print(ApproxCItheta)
 
 #some sample predictions at our field data
