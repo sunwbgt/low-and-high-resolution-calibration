@@ -225,14 +225,16 @@ opt.out2 = optim(
   method = "L-BFGS-B"
 )
 
-# predict injury risk for field data
-Xa1=c(XFs)
-Xa2=c(YF)
-Xa3=c(Type2)
-Cv2 <- 4*corrmat_error(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield))
+####This section need to be rewritten with correct correlation matrix in X##########
+# predict injury risk for field data 
+#Xa1=c(XFs)
+#Xa2=c(YF)
+#Xa3=c(Type2)
+#Cv2 <- 4*corrmat_error(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield))
 cholCv2 <- chol(Cv2)
 q2 = forwardsolve(t(cholCv2), opt.out2$par)
 wvals2 = backsolve(cholCv2, q2)
+####################################################################################
 
 #this function will be used to predict
 papprox <- function(DataPred){
