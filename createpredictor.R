@@ -146,8 +146,13 @@ dcorrmat_error <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
   return(R1*R2*R3)
 }
 
+# mvec <- function(X,Y){
+  # return(-9+0.01*X+15*sqrt(Y))
+# }
+
+# use the one provided in the literature - do not use sqrt anywhere else
 mvec <- function(X,Y){
-  return(-9+0.01*X+15*sqrt(Y))
+  return(-12.597+0.05861*X+1.568*sqrt(Y * 1000))
 }
 
 nsamp = 10
@@ -172,7 +177,7 @@ PostCalcApprox <- function(x,GPmodel,XF,XFs,ZF,ZD,integrateoveremulator=FALSE) {
   }
   Cv <- 4*Rv+10^(-4)*diag(rep(1,length(YF)))
   
-  mv <- mvec(XFs,sqrt(YF))
+  mv <- mvec(XFs,YF)
   pv <- exp(mv)/(1+exp(mv))
   diagadj = exp(mv)/(1+exp(mv))^2
   Cva = diag(diagadj)%*%Cv%*%diag(diagadj)
@@ -232,29 +237,29 @@ gPostCalc <- function(Z,zvec) {
 PostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
   # have to add abs() to avoid negative y's
-  hpred <- mvec(XFs,sqrt(abs(etaF+dvec[1:nfield])))+c(t(Cpred)%*%wvals)
+  hpred <- mvec(XFs,abs(etaF+dvec[1:nfield]))+c(t(Cpred)%*%wvals)
   pv <- exp(hpred) / (1 + exp(hpred))
-  Lik <- sum(-(1-ZF)*log(1-pv)-ZF*log(pv)) 
+  Lik <- sum(-(1-ZF)*log(1-pv)-ZF*log(pv))
   # Liklihood for exp data
   pd <- etaD+rep(dvec[nfield+1], nexp)
   Lik <- Lik + 0.5 * t(ZD - pd)%*%diag(rep(0.005^(-2), length(ZD)))%*%(ZD-pd)
   # Prior for bias
-  Prior <- sum(rep(4000,nfield+1)*(dvec-rep(0,nfield+1))^2)
+  Prior <- sum(rep(160,nfield+1)*(dvec-rep(0,nfield+1))^2)
   return(Lik+Prior)
 }
 gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
   # Derivative of the matrix
   Dpred <- 4*dcorrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
-  hpred <- mvec(XFs,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
-  dmvec <- 7.5/sqrt(abs(etaF+dvec[1:nfield]))
+  hpred <- mvec(XFs,abs(etaF+dvec[1:nfield]))+t(Cpred)%*%wvals
+  dmvec <- 784/sqrt(abs(etaF+dvec[1:nfield])*1000)
   pv <- exp(hpred) / (1 + exp(hpred))
   gpv <- exp(hpred) / (1 + exp(hpred))
   gLik <- (-(1-ZF)*1/(1-pv)*(-gpv)-ZF*1/pv*gpv)*(dmvec + c(t(Dpred) %*%wvals))
   # Liklihood for exp data - add one more element to the gradient
   gLik <- c(gLik, sum(etaD+rep(dvec[nfield+1], nexp)-ZD)/0.005^2)
   # Prior for bias
-  gPrior <- sum(rep(4000,nfield+1)*(dvec-rep(0,nfield+1))^2) * (-6) * (dvec - rep(0,nfield+1))
+  gPrior <- sum(rep(160,nfield+1)*(dvec-rep(0,nfield+1))^2) * (-6) * (dvec - rep(0,nfield+1))
   return(gLik+gPrior)
 }
 
@@ -265,22 +270,24 @@ etaD <- rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), nexp)
 bias <- rep(0, nfield + 1)
 bias_previous <- rep(999, nfield + 1)
 iteration <- 0
-# step 1: estimate g
-while (sum((bias-bias_previous)^2) > 0.001) {
+while (mean((bias-bias_previous)^2) > 10^(-5)) {
 	iteration <- iteration + 1
 	bias_previous = bias
+	# step 1: estimate g
 	YF = exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + bias[1 : nfield]
 	Cv <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2))+0.01*diag(rep(1,length(c(YE,YF))))
-	mv <- mvec(c(XEs,XFs),sqrt(c(YE,YF)))
+	mv <- mvec(c(XEs,XFs),c(YE,YF))
 	cholCv <- chol(Cv)
 	opt.out = optim(mv,fn <- PostCalc,gr <- gPostCalc, Z = c(ZE,ZF),method = "L-BFGS-B")
 	q1 = forwardsolve(t(cholCv), opt.out$par-mv)
 	wvals = backsolve(cholCv, q1)
 	# step 2: estimate delta
 	opt.out2 = optim(
-	  bias_previous,
+	  rep(0, nfield + 1),
 	  fn <- PostCalcDelta,
 	  gr <- gPostCalcDelta,
+	  lower = rep(-0.1, nfield + 1), 
+      upper = rep(0.5, nfield + 1),  
 	  Xa1=c(XEs,XFs),Xa2=c(YE,YF),Xa3=c(Type1,Type2),etaF=etaF,etaD=etaD,XFs=XFs,ZF=ZF,ZD=ZD,
 	  method = "L-BFGS-B"
 	)
@@ -305,7 +312,15 @@ papprox <- function(DataPred){
 
   #calculate injury risks
   Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = DataPred$Age,Xb2 = YFpred, Xb3 = rep(1,length(DataPred$Age)))
-  zpred = mvec(DataPred$Age,sqrt(YF))+t(Cpred)%*%wvals
+  zpred = mvec(DataPred$Age,YF)+t(Cpred)%*%wvals
+  return(exp(zpred)/(1+exp(zpred)))
+}
+
+#show prediction with g() to compare with m()
+gapprox <- function(age, ystar){
+  #calculate injury risks
+  Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = rep(age, length(ystar)), Xb2 = ystar, Xb3 = rep(1, length(ystar)))
+  zpred = mvec(rep(age, length(ystar)),ystar)+t(Cpred)%*%wvals
   return(exp(zpred)/(1+exp(zpred)))
 }
 
@@ -324,4 +339,17 @@ DataPred = data.frame("BMI"=B[,4],"Stature"=B[,5],"DeltaV"=B[,6],"Age"=XFs)
 # check prediction errors
 InjColor = rep('blue', nrow(DataPred))
 InjColor[ZF == 1] = 'red'
-plot(papprox(DataPred), col = InjColor, pch = 3, ylim = c(0, 1))
+plot(papprox(DataPred), col = InjColor, pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'Field test index', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+abline(h=0.5, lty=2, lwd=2)
+
+# compare m() with g()
+ystar <- (1:170) * 0.001
+h <- mvec1(rep(age, length(ystar)), ystar)
+plot(ystar, exp(h)/(1+exp(h)), type = 'n', lwd = 2, lty = 2, ylim = c(0, 1), xlab = 'Injury values', ylab = 'Predicted injury risks', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+i <- 0
+for (age in c(30, 50, 70)) {
+  i <- i + 1
+  h <- mvec1(rep(age, length(ystar)), ystar)
+  lines(ystar, gapprox(age, ystar), col = rainbow(3)[i], lty = 1, lwd = 2)
+  lines(ystar, exp(h)/(1+exp(h)), col = rainbow(3)[i], lwd = 2, lty = 2)
+}
