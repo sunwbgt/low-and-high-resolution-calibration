@@ -210,13 +210,7 @@ thetaMAP = opt.out1$par
 ApproxCItheta = cbind(thetaMAP-1.96*sqrt(diag(opt.out1$hessian^(-1))),thetaMAP+1.96*sqrt(diag(opt.out1$hessian^(-1))))
 print(ApproxCItheta)
 
-# start iterative procedure to estimate the model discrepancy and injury function
-YF = exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1])
-Cv <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2))+0.01*diag(rep(1,length(c(YE,YF))))
-mv <- mvec(c(XEs,XFs),sqrt(c(YE,YF)))
-
-cholCv <- chol(Cv)
-
+# optimization functions
 PostCalc <- function(Z,zvec) {
   pv = exp(zvec)/(1+exp(zvec))
   Lik = sum(-(1-Z)*log(1-pv)-Z*log(pv))
@@ -235,23 +229,10 @@ gPostCalc <- function(Z,zvec) {
   gPrior = backsolve(cholCv, q1)
   return(gLik+gPrior)
 }
-opt.out = optim(mv,fn <- PostCalc,gr <- gPostCalc, Z = c(ZE,ZF),method = "L-BFGS-B")
-q1 = forwardsolve(t(cholCv), opt.out$par-mv)
-wvals = backsolve(cholCv, q1)
-
-# estimate model discrepancy
-etaF <- YF
-twoexpvect = matrix((rep(c(25.47,1.75,35,thetaMAP),1)),nrow=1,byrow=T)
-etaD <- rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), nexp)
-
-Xa1=c(XEs,XFs)
-Xa2=c(YE,YF)
-Xa3=c(Type1,Type2)
-
 PostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
   # have to add abs() to avoid negative y's
-  hpred <- mvec(DataPred$Age,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
+  hpred <- mvec(XFs,sqrt(abs(etaF+dvec[1:nfield])))+c(t(Cpred)%*%wvals)
   pv <- exp(hpred) / (1 + exp(hpred))
   Lik <- sum(-(1-ZF)*log(1-pv)-ZF*log(pv)) 
   # Liklihood for exp data
@@ -265,11 +246,11 @@ gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
   # Derivative of the matrix
   Dpred <- 4*dcorrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
-  hpred <- mvec(DataPred$Age,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
+  hpred <- mvec(XFs,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
   dmvec <- 7.5/sqrt(abs(etaF+dvec[1:nfield]))
   pv <- exp(hpred) / (1 + exp(hpred))
   gpv <- exp(hpred) / (1 + exp(hpred))
-  gLik <- (-(1-ZF)*1/(1-pv)*(-gpv)-ZF*1/pv*gpv)*(dmvec + t(Dpred) %*%wvals)
+  gLik <- (-(1-ZF)*1/(1-pv)*(-gpv)-ZF*1/pv*gpv)*(dmvec + c(t(Dpred) %*%wvals))
   # Liklihood for exp data - add one more element to the gradient
   gLik <- c(gLik, sum(etaD+rep(dvec[nfield+1], nexp)-ZD)/0.005^2)
   # Prior for bias
@@ -277,28 +258,49 @@ gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   return(gLik+gPrior)
 }
 
-opt.out2 = optim(
-  rep(0,nfield+1),
-  fn <- PostCalcDelta,
-  gr <- gPostCalcDelta,
-  Xa1=Xa1,Xa2=Xa2,Xa3=Xa3,etaF=etaF,etaD=etaD,XFs=XFs,ZF=ZF,ZD=ZD,
-  method = "L-BFGS-B"
-)
+# start iterative procedure to estimate the model discrepancy and injury function
+twoexpvect = matrix((rep(c(25.47,1.75,35,thetaMAP),1)),nrow=1,byrow=T)
+etaF <- exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1])
+etaD <- rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), nexp)
+bias <- rep(0, nfield + 1)
+bias_previous <- rep(999, nfield + 1)
+iteration <- 0
+# step 1: estimate g
+while (sum((bias-bias_previous)^2) > 0.001) {
+	iteration <- iteration + 1
+	bias_previous = bias
+	YF = exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + bias[1 : nfield]
+	Cv <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2))+0.01*diag(rep(1,length(c(YE,YF))))
+	mv <- mvec(c(XEs,XFs),sqrt(c(YE,YF)))
+	cholCv <- chol(Cv)
+	opt.out = optim(mv,fn <- PostCalc,gr <- gPostCalc, Z = c(ZE,ZF),method = "L-BFGS-B")
+	q1 = forwardsolve(t(cholCv), opt.out$par-mv)
+	wvals = backsolve(cholCv, q1)
+	# step 2: estimate delta
+	opt.out2 = optim(
+	  bias_previous,
+	  fn <- PostCalcDelta,
+	  gr <- gPostCalcDelta,
+	  Xa1=c(XEs,XFs),Xa2=c(YE,YF),Xa3=c(Type1,Type2),etaF=etaF,etaD=etaD,XFs=XFs,ZF=ZF,ZD=ZD,
+	  method = "L-BFGS-B"
+	)
+	# export bias for field data
+	bias=opt.out2$par
+}
 
-# predict injury risk for field data
+
 Xa1=c(XF[, 1], rep(25.47, nexp))
 Xa2=c(XF[, 2], rep(1.75, nexp))
 Xa3=c(XF[, 3], rep(35, nexp))
-bias=c(opt.out2$par[1:nfield],rep(opt.out2$par[nfield+1], nexp))
 Cv2 <- 4*corrmat_x(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield+nexp))
 cholCv2 <- chol(Cv2)
-q2 = forwardsolve(t(cholCv2), bias)
+q2 = forwardsolve(t(cholCv2), c(bias[1:nfield],rep(bias[nfield+1], nexp)))
 wvals2 = backsolve(cholCv2, q2)
 
 #this function will be used to predict
 papprox <- function(DataPred){
   #introduce model discrepancy
-  Cpred0 <- 4*corrmat_x(Xa1, Xa2, Xa3, Xb1 = XF[, 1], Xb2 = XF[, 2], Xb3 = XF[, 3])
+  Cpred0 <- 4*corrmat_x(Xa1, Xa2, Xa3, Xb1 = DataPred$BMI, Xb2 = DataPred$Stature, DataPred$DeltaV)
   YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + t(Cpred0)%*%wvals2
 
   #calculate injury risks
@@ -314,17 +316,12 @@ print(ApproxCItheta)
 #some sample predictions at our field data
 DataPred = data.frame("BMI"=B[,4],"Stature"=B[,5],"DeltaV"=B[,6],"Age"=XFs)
 
-plot(DataPred$BMI,papprox(DataPred))
-plot(DataPred$Stature,papprox(DataPred))
-plot(DataPred$DeltaV,papprox(DataPred))
-plot(DataPred$Age,papprox(DataPred))
+# plot(DataPred$BMI,papprox(DataPred))
+# plot(DataPred$Stature,papprox(DataPred))
+# plot(DataPred$DeltaV,papprox(DataPred))
+# plot(DataPred$Age,papprox(DataPred))
 
 # check prediction errors
-InjPred = rep(0, nrow(DataPred))
-InjPred[papprox(DataPred) > 0.3] = 1
-plot(InjPred, col = 'red', pch = 3)
-points(ZF, col = 'blue', pch = 2)
-
 InjColor = rep('blue', nrow(DataPred))
 InjColor[ZF == 1] = 'red'
 plot(papprox(DataPred), col = InjColor, pch = 3, ylim = c(0, 1))
