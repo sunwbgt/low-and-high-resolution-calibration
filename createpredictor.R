@@ -47,7 +47,20 @@ Type1 = rep(0,length(XEs))
 Type2 = rep(1,length(XFs))
 Type3 = rep(2,length(ZD))
 
+# correlation matrix for GP of delta()
+corrmat_x <- function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
+  if (any(is.na(Xb1))){
+    Xb1 = Xa1
+    Xb2 = Xa2
+    Xb3 = Xa3
+  }
+  R1 <- exp(-abs(outer(Xa1,Xb1,'-')/12)^1.95)
+  R2 <- exp(-abs(outer(Xa2,Xb2,'-')/1)^1.95)
+  R3 <- exp(-abs(outer(Xa2,Xb2,'-')/17)^1.95)
+  return(R1*R2*R3)
+}
 
+# correlation matrix for GP of g()
 corrmat <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
   if (any(is.na(Xb1))){
     Xb1 = Xa1
@@ -56,7 +69,7 @@ corrmat <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
   }
   R1 <- exp(-abs(outer(Xa1,Xb1,'-')/40)^1.95)
   # change order from 1.95 to 2 for an easier error-in-variable calculation
-  R2 <- exp(-abs(outer(sqrt(Xa2),sqrt(Xb2),'-')/0.12)^2)
+  R2 <- exp(-abs(outer(Xa2,Xb2,'-')/0.035)^2)
   Xa3[Xa3 == 2] = 0
   Xb3[Xb3 == 2] = 0  
   R3 <- 0.95+0.05*(1-abs(outer(Xa3,Xb3,'-')))
@@ -79,15 +92,15 @@ corrmat_error <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
 	for (j in 1 : length(Xb1)) {
 	  # both from injury test
       if ((Xa3[i] == 0) && (Xb3[j] == 0)) {
-	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.12/(1+4*injury_std^2/0.12)) ^ 2)/(1+4*injury_std^2/0.12)^(1/2)
+	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035/(1+4*injury_std^2/0.035)) ^ 2)/(1+4*injury_std^2/0.035)^(1/2)
       }
       # only one from injury test
       if (((Xa3[i] == 0) && (Xb3[j] > 0)) || ((Xa3[i] > 0) && (Xb3[j] == 0))) {
-	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.12/(1+2*injury_std^2/0.12)) ^ 2)/(1+2*injury_std^2/0.12)^(1/2)
+	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035/(1+2*injury_std^2/0.035)) ^ 2)/(1+2*injury_std^2/0.035)^(1/2)
       }
       # none from injury test
       if ((Xa3[i] > 0) && (Xb3[j] > 0)) {
-        R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.12) ^ 2)
+        R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035) ^ 2)
       }
 	}
   }
@@ -98,11 +111,44 @@ corrmat_error <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
   return(R1*R2*R3)
 }
 
+# derivative of correlation matrix with respect to delta for error-in-variable GPs
+dcorrmat_error <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
+  # specify standard deviation of y in injury tests: 5% of the population standard deviation
+  injury_std <- 0.0014
+  if (any(is.na(Xb1))){
+    Xb1 = Xa1
+    Xb2 = Xa2
+    Xb3 = Xa3
+  }
+  R1 <- exp(-abs(outer(Xa1,Xb1,'-')/40)^1.95)
+  # change order from 1.95 to 2 for an easier error-in-variable calculation
+  R2 <- matrix(1, length(Xa1), length(Xb1))
+  for (i in 1 : length(Xa1)) {
+	for (j in 1 : length(Xb1)) {
+	  # both from injury test
+      if ((Xa3[i] == 0) && (Xb3[j] == 0)) {
+	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035/(1+4*injury_std^2/0.035)) ^ 2)/(1+4*injury_std^2/0.035)^(1/2)*2*(Xa2[i]-Xb2[j])/0.035/(1+4*injury_std^2/0.035)
+      }
+      # only one from injury test
+      if (((Xa3[i] == 0) && (Xb3[j] > 0)) || ((Xa3[i] > 0) && (Xb3[j] == 0))) {
+	    R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035/(1+2*injury_std^2/0.035)) ^ 2)/(1+2*injury_std^2/0.035)^(1/2)*2*(Xa2[i]-Xb2[j])/0.035/(1+2*injury_std^2/0.035)
+      }
+      # none from injury test
+      if ((Xa3[i] > 0) && (Xb3[j] > 0)) {
+        R2[i, j] = exp(-((Xa2[i] - Xb2[j])/0.035) ^ 2)*2*(Xa2[i]-Xb2[j])/0.035
+      }
+	}
+  }
+  # data with labels 0 or 2 come from the same lab environment (share the same type)
+  Xa3[Xa3 == 2] = 0
+  Xb3[Xb3 == 2] = 0
+  R3 <- 0.95+0.05*(1-abs(outer(Xa3,Xb3,'-')))
+  return(R1*R2*R3)
+}
 
 mvec <- function(X,Y){
   return(-9+0.01*X+15*sqrt(Y))
 }
-
 
 nsamp = 10
 normvecs = matrix(rnorm(length(ZF)*nsamp,0,1),nrow=length(ZF),ncol=nsamp) #makes function continous by fixing this
@@ -204,46 +250,59 @@ Xa3=c(Type1,Type2)
 
 PostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
-  hpred <- mvec(DataPred$Age,sqrt(etaF+dvec[1:nfield]))+t(Cpred)%*%wvals
+  # have to add abs() to avoid negative y's
+  hpred <- mvec(DataPred$Age,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
   pv <- exp(hpred) / (1 + exp(hpred))
   Lik <- sum(-(1-ZF)*log(1-pv)-ZF*log(pv)) 
   # Liklihood for exp data
-  pd <- etaD+dvec[(nfield+1):(nfield+nexp)]
+  pd <- etaD+rep(dvec[nfield+1], nexp)
   Lik <- Lik + 0.5 * t(ZD - pd)%*%diag(rep(0.005^(-2), length(ZD)))%*%(ZD-pd)
   # Prior for bias
-  Prior <- sum(rep(30,nexp+nfield)*(dvec-rep(0.01,nexp+nfield)^2))
+  Prior <- sum(rep(4000,nfield+1)*(dvec-rep(0,nfield+1))^2)
   return(Lik+Prior)
 }
+gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
+  Cpred <- 4*corrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
+  # Derivative of the matrix
+  Dpred <- 4*dcorrmat_error(Xa1,Xa2,Xa3,Xb1 = XFs,Xb2 = etaF+dvec[1:nfield], Xb3 = rep(1,length(XFs)))
+  hpred <- mvec(DataPred$Age,sqrt(abs(etaF+dvec[1:nfield])))+t(Cpred)%*%wvals
+  dmvec <- 7.5/sqrt(abs(etaF+dvec[1:nfield]))
+  pv <- exp(hpred) / (1 + exp(hpred))
+  gpv <- exp(hpred) / (1 + exp(hpred))
+  gLik <- (-(1-ZF)*1/(1-pv)*(-gpv)-ZF*1/pv*gpv)*(dmvec + t(Dpred) %*%wvals)
+  # Liklihood for exp data - add one more element to the gradient
+  gLik <- c(gLik, sum(etaD+rep(dvec[nfield+1], nexp)-ZD)/0.005^2)
+  # Prior for bias
+  gPrior <- sum(rep(4000,nfield+1)*(dvec-rep(0,nfield+1))^2) * (-6) * (dvec - rep(0,nfield+1))
+  return(gLik+gPrior)
+}
+
 opt.out2 = optim(
-  rep(0.01,nexp+nfield),
-  fn = PostCalcDelta,
+  rep(0,nfield+1),
+  fn <- PostCalcDelta,
+  gr <- gPostCalcDelta,
   Xa1=Xa1,Xa2=Xa2,Xa3=Xa3,etaF=etaF,etaD=etaD,XFs=XFs,ZF=ZF,ZD=ZD,
-  lower = c(rep(0.01,nexp+nfield)), 
-  upper = c(rep(0.05,nexp+nfield)),
-  control=list('factr' = 10^12, 'maxit'=50), 
-  hessian=T,
   method = "L-BFGS-B"
 )
 
-####This section need to be rewritten with correct correlation matrix in X##########
-# predict injury risk for field data 
-#Xa1=c(XFs)
-#Xa2=c(YF)
-#Xa3=c(Type2)
-#Cv2 <- 4*corrmat_error(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield))
+# predict injury risk for field data
+Xa1=c(XF[, 1], rep(25.47, nexp))
+Xa2=c(XF[, 2], rep(1.75, nexp))
+Xa3=c(XF[, 3], rep(35, nexp))
+bias=c(opt.out2$par[1:nfield],rep(opt.out2$par[nfield+1], nexp))
+Cv2 <- 4*corrmat_x(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield+nexp))
 cholCv2 <- chol(Cv2)
-q2 = forwardsolve(t(cholCv2), opt.out2$par)
+q2 = forwardsolve(t(cholCv2), bias)
 wvals2 = backsolve(cholCv2, q2)
-####################################################################################
 
 #this function will be used to predict
 papprox <- function(DataPred){
   #introduce model discrepancy
-  YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + t(Cv2)%*%wvals2
-
-  Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = DataPred$Age,Xb2 = YFpred, Xb3 = rep(1,length(DataPred$Age)))
+  Cpred0 <- 4*corrmat_x(Xa1, Xa2, Xa3, Xb1 = XF[, 1], Xb2 = XF[, 2], Xb3 = XF[, 3])
+  YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + t(Cpred0)%*%wvals2
 
   #calculate injury risks
+  Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = DataPred$Age,Xb2 = YFpred, Xb3 = rep(1,length(DataPred$Age)))
   zpred = mvec(DataPred$Age,sqrt(YF))+t(Cpred)%*%wvals
   return(exp(zpred)/(1+exp(zpred)))
 }
