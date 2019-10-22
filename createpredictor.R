@@ -13,13 +13,13 @@ nres = 4
 nsim = 196
 XCE = A[,2:(nvar+npara+1)]
 YCE = log(as.matrix(A[,(nvar+npara+2):ncol(A)]))
+GP = GPfitting(XCE, YCE)
 
 # read field data
 B = read.csv('Field_Test_Data_Full_Size_Sedan.csv', header = TRUE)
 nfield = nrow(B)
 
 # predict injuries for field data
-GP = GPfitting(XCE, YCE)
 Xpred_field = cbind(B[, 4 : 6], t(matrix(parameter_default, npara, nfield)))
 
 # read injury data
@@ -47,18 +47,7 @@ Type1 = rep(0,length(XEs))
 Type2 = rep(1,length(XFs))
 Type3 = rep(2,length(ZD))
 
-# correlation matrix for GP of delta()
-corrmat_x <- function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
-  if (any(is.na(Xb1))){
-    Xb1 = Xa1
-    Xb2 = Xa2
-    Xb3 = Xa3
-  }
-  R1 <- exp(-abs(outer(Xa1,Xb1,'-')/12)^1.95)
-  R2 <- exp(-abs(outer(Xa2,Xb2,'-')/1)^1.95)
-  R3 <- exp(-abs(outer(Xa2,Xb2,'-')/17)^1.95)
-  return(R1*R2*R3)
-}
+
 
 # correlation matrix for GP of g()
 corrmat <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
@@ -152,7 +141,7 @@ dcorrmat_error <-  function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
 
 # use the one provided in the literature - do not use sqrt anywhere else
 mvec <- function(X,Y){
-  return(-12.597+0.05861*X+1.568*sqrt(Y * 1000))
+  return(-12.597+0.05861*X+1.568*sqrt(abs(Y * 1000)))
 }
 
 nsamp = 10
@@ -244,7 +233,7 @@ PostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   pd <- etaD+rep(dvec[nfield+1], nexp)
   Lik <- Lik + 0.5 * t(ZD - pd)%*%diag(rep(0.005^(-2), length(ZD)))%*%(ZD-pd)
   # Prior for bias
-  Prior <- sum(rep(160,nfield+1)*(dvec-rep(0,nfield+1))^2)
+  Prior <- sum(rep(140,nfield+1)*(dvec-rep(0,nfield+1))^2)
   return(Lik+Prior)
 }
 gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
@@ -259,14 +248,14 @@ gPostCalcDelta <- function(dvec,Xa1,Xa2,Xa3,etaF,etaD,XFs,ZF,ZD) {
   # Liklihood for exp data - add one more element to the gradient
   gLik <- c(gLik, sum(etaD+rep(dvec[nfield+1], nexp)-ZD)/0.005^2)
   # Prior for bias
-  gPrior <- sum(rep(160,nfield+1)*(dvec-rep(0,nfield+1))^2) * (-6) * (dvec - rep(0,nfield+1))
+  gPrior <- sum(rep(140,nfield+1)*(dvec-rep(0,nfield+1))^2) * (-6) * (dvec - rep(0,nfield+1))
   return(gLik+gPrior)
 }
 
 # start iterative procedure to estimate the model discrepancy and injury function
 twoexpvect = matrix((rep(c(25.47,1.75,35,thetaMAP),1)),nrow=1,byrow=T)
-etaF <- exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1])
-etaD <- rep(exp(GPpred(GPmodel, twoexpvect)$pred[1,1]), nexp)
+etaF <- exp((GPpred(GP, cbind(XF, t(matrix(thetaMAP, npara, nfield))))$pred)[,1])
+etaD <- rep(exp(GPpred(GP, twoexpvect)$pred[1,1]), nexp)
 bias <- rep(0, nfield + 1)
 bias_previous <- rep(999, nfield + 1)
 iteration <- 0
@@ -274,7 +263,7 @@ while (mean((bias-bias_previous)^2) > 10^(-5)) {
 	iteration <- iteration + 1
 	bias_previous = bias
 	# step 1: estimate g
-	YF = exp((GPpred(GP, cbind(B[, 4 : 6], t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + bias[1 : nfield]
+	YF = exp((GPpred(GP, cbind(XF, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + bias[1 : nfield]
 	Cv <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2))+0.01*diag(rep(1,length(c(YE,YF))))
 	mv <- mvec(c(XEs,XFs),c(YE,YF))
 	cholCv <- chol(Cv)
@@ -295,24 +284,28 @@ while (mean((bias-bias_previous)^2) > 10^(-5)) {
 	bias=opt.out2$par
 }
 
-
-Xa1=c(XF[, 1], rep(25.47, nexp))
-Xa2=c(XF[, 2], rep(1.75, nexp))
-Xa3=c(XF[, 3], rep(35, nexp))
-Cv2 <- 4*corrmat_x(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield+nexp))
-cholCv2 <- chol(Cv2)
-q2 = forwardsolve(t(cholCv2), c(bias[1:nfield],rep(bias[nfield+1], nexp)))
-wvals2 = backsolve(cholCv2, q2)
+# correlation matrix for GP of delta()
+corrmat_x <- function(Xa1,Xa2,Xa3,...,Xb1=NA,Xb2=NA,Xb3=NA){
+  if (any(is.na(Xb1))){
+    Xb1 = Xa1
+    Xb2 = Xa2
+    Xb3 = Xa3
+  }
+  R1 <- exp(-abs(outer(Xa1,Xb1,'-')/4)^1.95)
+  R2 <- exp(-abs(outer(Xa2,Xb2,'-')/2)^1.95)
+  R3 <- exp(-abs(outer(Xa2,Xb2,'-')/3)^1.95)
+  return(R1*R2*R3)
+}
 
 #this function will be used to predict
 papprox <- function(DataPred){
   #introduce model discrepancy
   Cpred0 <- 4*corrmat_x(Xa1, Xa2, Xa3, Xb1 = DataPred$BMI, Xb2 = DataPred$Stature, DataPred$DeltaV)
-  YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nfield))))$pred)[,1]) + t(Cpred0)%*%wvals2
+  YFpred = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(thetaMAP, npara, nrow(DataPred)))))$pred)[,1]) + t(Cpred0)%*%wvals2
 
   #calculate injury risks
   Cpred <- 4*corrmat_error(c(XEs,XFs),c(YE,YF),c(Type1,Type2),Xb1 = DataPred$Age,Xb2 = YFpred, Xb3 = rep(1,length(DataPred$Age)))
-  zpred = mvec(DataPred$Age,YF)+t(Cpred)%*%wvals
+  zpred = mvec(DataPred$Age,YFpred)+t(Cpred)%*%wvals
   return(exp(zpred)/(1+exp(zpred)))
 }
 
@@ -324,32 +317,67 @@ gapprox <- function(age, ystar){
   return(exp(zpred)/(1+exp(zpred)))
 }
 
+
+Xa1=c(XF[, 1], rep(25.47, nexp))
+Xa2=c(XF[, 2], rep(1.75, nexp))
+Xa3=c(XF[, 3], rep(35, nexp))
+Cv2 <- 4*corrmat_x(Xa1,Xa2,Xa3)+0.01*diag(rep(1,nfield+nexp))
+cholCv2 <- chol(Cv2)
+q2 = forwardsolve(t(cholCv2), c(bias[1:nfield],rep(bias[nfield+1], nexp)))
+wvals2 = backsolve(cholCv2, q2)
 #this is an approximation of the CI for the parameters. 
 #No identifiability correction was used
 print(ApproxCItheta)
 
-#some sample predictions at our field data
-DataPred = data.frame("BMI"=B[,4],"Stature"=B[,5],"DeltaV"=B[,6],"Age"=XFs)
+# check the trends
+DataPred = data.frame("BMI"=B[,4],"Stature"=B[,5],"DeltaV"=B[,6],"Age"=B$Age)
+plot(DataPred$BMI,papprox(DataPred), pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'BMI', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+plot(DataPred$Stature,papprox(DataPred), pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'Stature', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+plot(DataPred$DeltaV,papprox(DataPred), pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'DeltaV', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+plot(DataPred$Age,papprox(DataPred), pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'Age', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
 
-# plot(DataPred$BMI,papprox(DataPred))
-# plot(DataPred$Stature,papprox(DataPred))
-# plot(DataPred$DeltaV,papprox(DataPred))
-# plot(DataPred$Age,papprox(DataPred))
 
-# check prediction errors
+# check prediction errors in the training set
+DataPred = data.frame("BMI"=XF[,1],"Stature"=XF[,2],"DeltaV"=XF[,3],"Age"=XFs)
 InjColor = rep('blue', nrow(DataPred))
 InjColor[ZF == 1] = 'red'
 plot(papprox(DataPred), col = InjColor, pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'Field test index', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
 abline(h=0.5, lty=2, lwd=2)
+legend('topright', c('Z=0', 'Z=1'), col = c('blue', 'red'), pch = 3, cex = 1.2)
+
+# check prediction errors by simulation and m() in the training set
+DataPred = data.frame("BMI"=XF[,1],"Stature"=XF[,2],"DeltaV"=XF[,3],"Age"=XFs)
+predinj = exp((GPpred(GP, cbind(DataPred$BMI,DataPred$Stature,DataPred$DeltaV, t(matrix(parameter_default, npara, nrow(DataPred)))))$pred)[,1])
+predprob = exp(mvec(DataPred$Age, predinj)) / (1 + exp(mvec(DataPred$Age, predinj)))
+InjColor = rep('blue', nrow(DataPred))
+InjColor[ZF == 1] = 'red'
+plot(predprob, col = InjColor, pch = 3, ylim = c(0, 1), ylab = 'Predicted injury risks', xlab = 'Field test index', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
+abline(h=0.5, lty=2, lwd=2)
+legend('topright', c('Z=0', 'Z=1'), col = c('blue', 'red'), pch = 3, cex = 1.2)
 
 # compare m() with g()
 ystar <- (1:170) * 0.001
-h <- mvec1(rep(age, length(ystar)), ystar)
+h <- mvec(rep(1, length(ystar)), ystar)
 plot(ystar, exp(h)/(1+exp(h)), type = 'n', lwd = 2, lty = 2, ylim = c(0, 1), xlab = 'Injury values', ylab = 'Predicted injury risks', cex = 1.2, cex.lab = 1.5, cex.axis = 1.5)
 i <- 0
 for (age in c(30, 50, 70)) {
   i <- i + 1
-  h <- mvec1(rep(age, length(ystar)), ystar)
+  h <- mvec(rep(age, length(ystar)), ystar)
   lines(ystar, gapprox(age, ystar), col = rainbow(3)[i], lty = 1, lwd = 2)
   lines(ystar, exp(h)/(1+exp(h)), col = rainbow(3)[i], lwd = 2, lty = 2)
 }
+ind30 <- c()
+ind50 <- c()
+ind70 <- c()
+for (i in 1 : length(YE)) {
+  if ((XEs[i] > 15) && (XEs[i] < 35))
+	ind30 <- c(ind30, i) 
+  if ((XEs[i] > 45) && (XEs[i] < 55))
+	ind50 <- c(ind50, i)  
+  if ((XEs[i] > 65) && (XEs[i] < 75))
+	ind70 <- c(ind70, i)  
+}
+points(YE[ind30], ZE[ind30], col = 'red', cex = 1.2, pch = 4)
+points(YE[ind50], ZE[ind50], col = 'green', cex = 1.2, pch = 4)
+points(YE[ind70], ZE[ind70], col = 'blue', cex = 1.2, pch = 4)
+legend('bottomright', c('h_MAP, age=30', 'h_MAP, age=50', 'h_MAP, age=70', 'empirical m, age=30', 'empirical m, age=50', 'empirical m, age=70'), col = c(rainbow(3), rainbow(3)), lty = c(1, 1, 1, 2, 2, 2), lwd = 2)
