@@ -588,7 +588,7 @@ for (i in 2 : n_iter) {
 	V_hat_eta_field <- diag(exp(GP_obj_field$pred)[, 1]) %*% (GP_obj_field$corr_mat * GP_obj_field$var_scale[1,1]) %*% diag(exp(GP_obj_field$pred)[, 1])
 	delta_hat_exp <- t(mat_cross) %*% solve(K_zeta + diag(nugget_val, n_field)) %*% delta_hat_field 
 	part1_nom <- -1 / 2 * t(zeta_hat - delta_hat_field) %*% solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) %*% (zeta_hat - delta_hat_field)
-	part2_nom <- -0.5 * sum(log(abs(eigen(solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) + W_zeta)$values))) + 0.5 * sum(log(abs(eigen(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field)$values)))
+	part2_nom <- -0.5 * sum(log(abs(eigen(solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) + W_zeta)$values))) - 0.5 * sum(log(abs(eigen(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field)$values)))
 	part3_nom <- -n_exp / 2 * log(1 / lambda_E_gibbs[i] + V_hat_delta_exp / lambda_delta_gibbs[i] + V_hat_eta_exp)
 	part4_nom <- -1 / 2 / (1 / lambda_E_gibbs[i] + V_hat_delta_exp / lambda_delta_gibbs[i] + V_hat_eta_exp) * sum((Y_exp - exp(GP_obj_exp$pred)[, 1] - rep(delta_hat_exp, n_exp)) ^ 2)
 	part5_nom <- -1 / 2 * t(theta_propose - parameter_default) %*% diag(rep(theta_w, n_para)) %*% (theta_propose - parameter_default)
@@ -601,7 +601,7 @@ for (i in 2 : n_iter) {
 	V_hat_eta_field <- diag(exp(GP_obj_field$pred)[, 1]) %*% (GP_obj_field$corr_mat * GP_obj_field$var_scale[1,1]) %*% diag(exp(GP_obj_field$pred)[, 1])	
 	delta_hat_exp <- t(mat_cross) %*% solve(K_zeta + diag(nugget_val, n_field)) %*% delta_hat_field 
 	part1_denom <- -1 / 2 * t(zeta_hat - delta_hat_field) %*% solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) %*% (zeta_hat - delta_hat_field)
-	part2_denom <- -0.5 * sum(log(abs(eigen(solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) + W_zeta)$values))) + 0.5 * sum(log(abs(eigen(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field)$values)))
+	part2_denom <- -0.5 * sum(log(abs(eigen(solve(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field + diag(nugget_val, n_field)) + W_zeta)$values))) - 0.5 * sum(log(abs(eigen(K_zeta / lambda_delta_gibbs[i] + V_hat_eta_field)$values)))
 	part3_denom <- -n_exp / 2 * log(1 / lambda_E_gibbs[i] + V_hat_delta_exp / lambda_delta_gibbs[i] + V_hat_eta_exp)
 	part4_denom <- -1 / 2 / (1 / lambda_E_gibbs[i] + V_hat_delta_exp / lambda_delta_gibbs[i] + V_hat_eta_exp) * sum((Y_exp - exp(GP_obj_exp$pred)[, 1] - rep(delta_hat_exp, n_exp)) ^ 2)
 	part5_denom <- -1 / 2 * t(theta_gibbs[i - 1, ] - parameter_default) %*% diag(rep(theta_w, n_para)) %*% (theta_gibbs[i - 1, ] - parameter_default)
